@@ -1,0 +1,16 @@
+{
+  "id": "chat_1743385963",
+  "title": "List Disk Space Usage",
+  "timestamp": 1743386809.597877,
+  "history": [
+    {
+      "prompt": "i want a list of all disk and free space",
+      "response": {
+        "powershell": "",
+        "zsh": "lsblk",
+        "instructions": "`lsblk` will show you the disk partitions and their usage status.\n\n- This command lists block devices and their sizes.\n- It displays both physical disks and logical volumes (e.g., those from LVM).\n- The output includes size, ro, type, and name of each device.\n\nExample output:\n```\nNAME   MAJ:MIN RM   SIZE RO TYPE NAME\n/dev/sda1   8:17 -  100.00G  0 part /System/\n/dev/sda2   8:18 -   20.00G  0 part /Users/\n/dev/swap   8:19 -     4.00G  0 swap /swap\n```\n\nPotential issues:\n- The output might be overwhelming if you have many disks.\n- Some devices may not be mounted (e.g., external drives).\n\nAlternative approach:\nUse `df` for a more detailed view of disk space usage across all mounted file systems.",
+        "title": "List Disk Space Usage"
+      }
+    }
+  ]
+}

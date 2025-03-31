@@ -1,0 +1,16 @@
+{
+  "id": "chat_1743386871",
+  "title": "List Currently Logged-in Users",
+  "timestamp": 1743386902.8770251,
+  "history": [
+    {
+      "prompt": "i want to show all users on machine",
+      "response": {
+        "powershell": "",
+        "zsh": "who",
+        "instructions": "The `who` command displays a list of currently logged-in users on your system, along with information about their sessions.",
+        "title": "List Currently Logged-in Users"
+      }
+    }
+  ]
+}

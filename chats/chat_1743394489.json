@@ -1,0 +1,16 @@
+{
+  "id": "chat_1743394489",
+  "title": "Display Disk Space Usage",
+  "timestamp": 1743394515.739264,
+  "history": [
+    {
+      "prompt": "show me disks and space avail",
+      "response": {
+        "powershell": "",
+        "zsh": "df -h",
+        "instructions": "This command will show disk space usage in a human-readable format, displaying disk size, used space, available space, and percentage used for each mounted filesystem.\n\nPrerequisites: You should have root or appropriate permissions to run this command. The 'df' command is typically available on most Unix-like systems.\n\nExpected output:\nYou should see a list of partitions with their respective details. For example:\n\nFilesystem     Size  Used Available Use% | Mounted on\n-----------------------------------------\n/dev/sda1        50G   40G    10G  80% /boot\n/dev/sda2       500G 300G  200G  60% /home\n...\n\nIf the output is too long or you want more details, you can add options like '-h' for human-readable numbers.\n",
+        "title": "Display Disk Space Usage"
+      }
+    }
+  ]
+}
