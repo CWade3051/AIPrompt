@@ -9,16 +9,48 @@ import os
 import time
 import glob
 import sys
+import traceback
+import logging
+import signal
+import psutil
+
+# Set up logging
+def setup_logging():
+    log_dir = os.path.expanduser("~/Library/Logs/AIPrompt")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "aiprompt.log")
+    
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    logging.info("Starting AIPrompt application")
 
 # Redirect stdout/stderr to a file to catch crashes in --windowed mode
-sys.stdout = open("/tmp/aiprompt_stdout.log", "w")
-sys.stderr = open("/tmp/aiprompt_stderr.log", "w")
+try:
+    log_dir = os.path.expanduser("~/Library/Logs/AIPrompt")
+    os.makedirs(log_dir, exist_ok=True)
+    sys.stdout = open(os.path.join(log_dir, "aiprompt_stdout.log"), "w")
+    sys.stderr = open(os.path.join(log_dir, "aiprompt_stderr.log"), "w")
+except Exception as e:
+    print(f"Failed to redirect stdout/stderr: {e}")
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 CHAT_DIR = os.path.join(APP_ROOT, "chats")
 
-os.environ['TCL_LIBRARY'] = '/opt/homebrew/Cellar/tcl-tk@8/8.6.16/lib/tcl8.6'
-os.environ['TK_LIBRARY'] = '/opt/homebrew/Cellar/tcl-tk@8/8.6.16/lib/tk8.6'
+# Try to set TCL/TK paths with error handling
+try:
+    if platform.system() == 'Darwin':  # macOS
+        tcl_path = '/opt/homebrew/Cellar/tcl-tk@8/8.6.16/lib/tcl8.6'
+        tk_path = '/opt/homebrew/Cellar/tcl-tk@8/8.6.16/lib/tk8.6'
+        
+        if os.path.exists(tcl_path):
+            os.environ['TCL_LIBRARY'] = tcl_path
+        if os.path.exists(tk_path):
+            os.environ['TK_LIBRARY'] = tk_path
+except Exception as e:
+    print(f"Warning: Failed to set TCL/TK paths: {e}")
 
 class LMStudioApp:
     def __init__(self, root):
@@ -30,32 +62,57 @@ class LMStudioApp:
         if self.is_windows:
             self.shell_label = "PowerShell"
             self.shell_key = "powershell"
+            # Set up temp directory for Windows
+            self.log_dir = os.path.join(os.environ.get('TEMP', os.path.expanduser('~')), 'AIPrompt', 'Logs')
         else:
             self.shell_label = "ZSH"
+            self.shell_key = "zsh"
+            # Set up log directory for Unix/Mac
+            self.log_dir = os.path.expanduser("~/Library/Logs/AIPrompt")
+
+        # Create log directory
+        os.makedirs(self.log_dir, exist_ok=True)
+
+        # Set up logging
+        log_file = os.path.join(self.log_dir, "aiprompt.log")
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+        logging.info(f"Starting AIPrompt application on {platform.system()}")
+
+        # Redirect stdout/stderr
+        try:
+            sys.stdout = open(os.path.join(self.log_dir, "aiprompt_stdout.log"), "w")
+            sys.stderr = open(os.path.join(self.log_dir, "aiprompt_stderr.log"), "w")
+        except Exception as e:
+            print(f"Failed to redirect stdout/stderr: {e}")
 
         # Initialize conversation history
         self.conversation_history = []
         self.current_chat_id = self.generate_chat_id()
         self.current_chat_title = "New Chat"
+        self.terminal_output = []
 
         # Create chats directory if it doesn't exist
         os.makedirs(CHAT_DIR, exist_ok=True)
 
         # Default LM Studio info
-        self.lmstudio_url_default = "http://192.168.1.51:1234"
-        # We'll store the current server URL or API key in StringVars
+        self.lmstudio_url_default = "http://localhost:1234"  # Changed to localhost
         self.server_url = tk.StringVar(master=self.root, value=self.lmstudio_url_default)
         self.openai_api_key = tk.StringVar(master=self.root, value="")
 
         # Track which provider is selected
         self.ai_provider = tk.StringVar(master=self.root, value="LM Studio")
-        # Holds the currently selected model
         self.selected_model = tk.StringVar(master=self.root, value="")
 
         # Model list for either LM Studio or OpenAI
         self.models_list = []
 
-        # We'll store the current recommended command for the "Run Command" button
+        # Process tracking
+        self.current_process = None
+        self.output_running = False
         self.current_shell_command = ""
 
         # Create the UI
@@ -63,6 +120,9 @@ class LMStudioApp:
 
         # By default, use LM Studio as our client
         self.refresh_models()
+        
+        # Load existing chats on startup
+        self.update_chat_list()
 
     def create_widgets(self):
         """
@@ -80,21 +140,36 @@ class LMStudioApp:
         self.history_frame = tk.Frame(self.root, width=200)
         self.history_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
         
-        # Create header frame for history label and new chat button
+        # Create header frame for history label and buttons
         history_header = tk.Frame(self.history_frame)
         history_header.pack(fill=tk.X, pady=(0, 5))
         
-        # Add label and button in same row
+        # Add label and buttons in same row
         tk.Label(history_header, text="Chat History").pack(side=tk.LEFT)
-        tk.Button(history_header, text="New Chat", command=self.start_new_chat).pack(side=tk.RIGHT)
+        
+        # Button frame for New Chat and Delete buttons
+        button_frame = tk.Frame(history_header)
+        button_frame.pack(side=tk.RIGHT)
+        
+        tk.Button(button_frame, text="New Chat", command=self.start_new_chat).pack(side=tk.LEFT, padx=2)
+        tk.Button(button_frame, text="Delete", command=self.delete_selected_chats).pack(side=tk.LEFT, padx=2)
         
         # Add history listbox with scrollbar
         history_scroll = tk.Scrollbar(self.history_frame)
         history_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.history_list = tk.Listbox(self.history_frame, width=25, yscrollcommand=history_scroll.set)
+        
+        # Configure listbox for multi-select
+        self.history_list = tk.Listbox(
+            self.history_frame,
+            width=25,
+            yscrollcommand=history_scroll.set,
+            selectmode=tk.EXTENDED  # Enable multi-select
+        )
         self.history_list.pack(side=tk.LEFT, fill=tk.Y)
         history_scroll.config(command=self.history_list.yview)
         self.history_list.bind('<<ListboxSelect>>', self.on_history_select)
+        # Add mouse click handler to prevent accidental multi-select
+        self.history_list.bind('<Button-1>', self.on_history_click)
 
         # Create main content frame
         main_frame = tk.Frame(self.root)
@@ -114,6 +189,9 @@ class LMStudioApp:
         provider_dropdown.pack(side=tk.LEFT, padx=5)
         provider_dropdown.bind("<<ComboboxSelected>>", self.on_provider_change)
 
+        # Add Clear All Chats button to the right of provider selection
+        tk.Button(provider_frame, text="Clear All Chats", command=self.clear_all_chats).pack(side=tk.RIGHT)
+
         # --- Config Frame: LM Studio URL or OpenAI API Key ---
         config_frame = tk.Frame(main_frame)
         config_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -129,7 +207,7 @@ class LMStudioApp:
         self.api_key_label.pack_forget()
         self.api_key_entry.pack_forget()
 
-        tk.Button(config_frame, text="Refresh Models", command=self.refresh_models).pack(side=tk.LEFT, padx=5)
+        tk.Button(config_frame, text="Refresh Models", command=self.refresh_models).pack(side=tk.RIGHT)
 
         # --- Model Selection Frame ---
         model_frame = tk.Frame(main_frame)
@@ -175,8 +253,25 @@ class LMStudioApp:
         # 4) Terminal Output Frame
         output_frame = tk.Frame(self.main_paned)
         self.main_paned.add(output_frame, minsize=100)
-        self.output_label = tk.Label(output_frame, text=f"{self.shell_label} Output:")
-        self.output_label.pack(anchor="w")
+        
+        # Create header frame for output
+        output_header = tk.Frame(output_frame)
+        output_header.pack(fill=tk.X)
+        
+        self.output_label = tk.Label(output_header, text=f"{self.shell_label} Output:")
+        self.output_label.pack(side=tk.LEFT)
+        
+        # Add Kill Command button (initially disabled)
+        self.kill_button = tk.Button(
+            output_header,
+            text="Kill Command",
+            command=self.kill_current_process,
+            state=tk.DISABLED,
+            fg='red'
+        )
+        self.kill_button.pack(side=tk.RIGHT, padx=5)
+        
+        # Add output text widget
         self.output_text = scrolledtext.ScrolledText(output_frame, wrap="word", height=8)
         self.output_text.pack(fill=tk.BOTH, expand=True)
 
@@ -635,44 +730,113 @@ class LMStudioApp:
         capturing and displaying output in real time.
         """
         self.log_output(f"Executing command: {command}")
+        
+        # Enable kill button
+        self.kill_button.config(state=tk.NORMAL)
+        self.output_running = True
 
         def run_command():
             try:
                 if self.is_windows:
+                    # For Windows, use a different creation flag to create new process group
                     process = subprocess.Popen(
-                        ["powershell", "-Command", command],
+                        ["powershell", "-NoProfile", "-Command", command],
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
-                        text=True
+                        text=True,
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if self.is_windows else 0
                     )
                 else:
+                    # For Unix/Mac, use process group
                     process = subprocess.Popen(
                         command,
                         shell=True,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
-                        text=True
+                        text=True,
+                        preexec_fn=os.setsid
                     )
-                while True:
+                
+                self.current_process = process
+                
+                # Set up a buffer for output
+                output_buffer = []
+                max_buffer_size = 1000  # Maximum lines to keep in history
+                
+                while self.output_running:
                     line = process.stdout.readline()
                     if not line and process.poll() is not None:
                         break
                     if line:
+                        # Add to buffer if not too large
+                        if len(output_buffer) < max_buffer_size:
+                            output_buffer.append(line.rstrip())
                         self.root.after(0, self.log_output, line.rstrip())
-                process.wait()
+                
+                # If process is still running when loop exits, terminate it
+                if process.poll() is None:
+                    self.kill_current_process()
+                
+                # Save reasonable amount of output to chat history
+                self.terminal_output = output_buffer
+                
                 self.log_output("Command execution completed.")
+                
             except Exception as e:
                 self.log_output(f"Error executing command: {str(e)}")
+            finally:
+                self.current_process = None
+                self.output_running = False
+                self.root.after(0, lambda: self.kill_button.config(state=tk.DISABLED))
 
         threading.Thread(target=run_command, daemon=True).start()
+
+    def kill_current_process(self):
+        """Kill the currently running command process and all its children"""
+        if self.current_process:
+            try:
+                self.output_running = False
+                
+                if self.is_windows:
+                    try:
+                        # On Windows, first try to gracefully terminate PowerShell
+                        subprocess.run(
+                            ["powershell", "-Command", "Get-Process -Id " + str(self.current_process.pid) + " | Stop-Process -Force"],
+                            timeout=2
+                        )
+                    except:
+                        # If that fails, use psutil as backup
+                        try:
+                            parent = psutil.Process(self.current_process.pid)
+                            for child in parent.children(recursive=True):
+                                try:
+                                    child.terminate()
+                                except:
+                                    child.kill()
+                            parent.terminate()
+                        except:
+                            # Last resort: force kill
+                            self.current_process.kill()
+                else:
+                    # On Unix, kill the process group
+                    os.killpg(os.getpgid(self.current_process.pid), signal.SIGTERM)
+                    
+                self.log_output("\nCommand terminated by user.")
+                
+            except Exception as e:
+                self.log_output(f"\nError killing process: {str(e)}")
+            finally:
+                self.current_process = None
+                self.kill_button.config(state=tk.DISABLED)
 
     # ---------------------- Utility Functions ----------------------
     def log_output(self, message):
         """
-        Append a line of text to the Terminal Output box.
+        Append a line of text to the Terminal Output box and save to history.
         """
         self.output_text.insert(tk.END, message + "\n")
         self.output_text.see(tk.END)
+        self.terminal_output.append(message)  # Save to history
 
     def copy_output_to_prompt(self):
         """
@@ -684,9 +848,10 @@ class LMStudioApp:
 
     def clear_output(self):
         """
-        Clears the Terminal Output box.
+        Clears the Terminal Output box and history.
         """
         self.output_text.delete("1.0", tk.END)
+        self.terminal_output = []  # Clear history
 
     def on_commands_text_change(self, event=None):
         """Handle changes to the commands text field"""
@@ -697,6 +862,10 @@ class LMStudioApp:
 
     def start_new_chat(self):
         """Start a new chat session"""
+        # Kill any running process before starting new chat
+        if self.current_process:
+            self.kill_current_process()
+            
         # Save current chat if exists
         self.save_current_chat()
         
@@ -708,9 +877,11 @@ class LMStudioApp:
         self.commands_text.delete("1.0", tk.END)
         self.output_text.delete("1.0", tk.END)
         
-        # Reset conversation history
+        # Reset conversation history and terminal output
         self.current_chat_id = self.generate_chat_id()
         self.conversation_history = []
+        self.terminal_output = []
+        self.current_chat_title = "New Chat"
         
         # Update UI
         self.update_chat_list()
@@ -721,12 +892,13 @@ class LMStudioApp:
 
     def save_current_chat(self):
         """Save the current chat to a JSON file"""
-        if hasattr(self, 'current_chat_id') and self.conversation_history:
+        if hasattr(self, 'current_chat_id') and (self.conversation_history or self.terminal_output):
             chat_data = {
                 'id': self.current_chat_id,
                 'title': self.current_chat_title if hasattr(self, 'current_chat_title') else "New Chat",
                 'timestamp': time.time(),
-                'history': self.conversation_history
+                'history': self.conversation_history,
+                'terminal_output': self.terminal_output  # Save terminal output
             }
             
             # Create chats directory if it doesn't exist
@@ -738,43 +910,75 @@ class LMStudioApp:
 
     def load_chat(self, chat_id):
         """Load a chat from its JSON file"""
+        # Kill any running process before loading new chat
+        if self.current_process:
+            self.kill_current_process()
+            
         try:
-            with open(os.path.join(CHAT_DIR, f"{chat_id}.json"), 'r') as f:
+            chat_file = os.path.join(CHAT_DIR, f"{chat_id}.json")
+            if not os.path.exists(chat_file):
+                print(f"Chat file not found: {chat_file}")
+                return
+            
+            with open(chat_file, 'r') as f:
                 chat_data = json.load(f)
-                
+            
             self.current_chat_id = chat_data['id']
             self.current_chat_title = chat_data.get('title', "Untitled Chat")
             self.conversation_history = chat_data['history']
+            self.terminal_output = chat_data.get('terminal_output', [])  # Load terminal output with default empty list
             
             # Replay the conversation in the UI
             self.replay_conversation()
             
         except Exception as e:
             print(f"Error loading chat: {e}")
+            logging.error(f"Error loading chat: {e}")
 
     def replay_conversation(self):
         """Replay the loaded conversation in the UI"""
-        # Clear current content
-        self.prompt_text.delete("1.0", tk.END)
-        self.instructions_text.config(state=tk.NORMAL)
-        self.instructions_text.delete("1.0", tk.END)
-        self.instructions_text.config(state=tk.DISABLED)
-        self.commands_text.delete("1.0", tk.END)
-        self.output_text.delete("1.0", tk.END)
-        
-        # Replay the last exchange if exists
-        if self.conversation_history:
-            last_exchange = self.conversation_history[-1]
-            self.prompt_text.insert(tk.END, last_exchange['prompt'])
+        try:
+            # Clear current content
+            self.prompt_text.delete("1.0", tk.END)
+            self.instructions_text.config(state=tk.NORMAL)
+            self.instructions_text.delete("1.0", tk.END)
+            self.commands_text.delete("1.0", tk.END)
+            self.output_text.delete("1.0", tk.END)
             
-            if 'response' in last_exchange:
-                self.instructions_text.config(state=tk.NORMAL)
-                self.instructions_text.insert(tk.END, last_exchange['response'].get('instructions', ''))
-                self.instructions_text.config(state=tk.DISABLED)
+            # Replay terminal output if exists
+            if hasattr(self, 'terminal_output'):
+                for line in self.terminal_output:
+                    self.output_text.insert(tk.END, str(line) + "\n")
+            
+            # Replay the last exchange if exists
+            if self.conversation_history:
+                last_exchange = self.conversation_history[-1]
+                # Set the prompt
+                if 'prompt' in last_exchange:
+                    self.prompt_text.insert(tk.END, last_exchange['prompt'])
                 
-                shell_cmd = last_exchange['response'].get(self.shell_key, '')
-                self.commands_text.insert(tk.END, shell_cmd)
-                self.run_command_button.config(state=tk.NORMAL if shell_cmd else tk.DISABLED)
+                # Set the response if it exists
+                if 'response' in last_exchange:
+                    response = last_exchange['response']
+                    # Set instructions
+                    if 'instructions' in response:
+                        self.instructions_text.insert(tk.END, response['instructions'])
+                    self.instructions_text.config(state=tk.DISABLED)
+                    
+                    # Set shell command
+                    shell_cmd = response.get('zsh' if not self.is_windows else 'powershell', '')
+                    if shell_cmd:
+                        self.commands_text.insert(tk.END, shell_cmd)
+                        self.current_shell_command = shell_cmd
+                        self.run_command_button.config(state=tk.NORMAL)
+                    else:
+                        self.run_command_button.config(state=tk.DISABLED)
+        
+        except Exception as e:
+            print(f"Error replaying conversation: {e}")
+            logging.error(f"Error replaying conversation: {e}")
+            # Try to show error to user
+            messagebox.showerror("Error", f"Failed to load chat content: {str(e)}")
 
     def update_chat_list(self):
         """Update the chat history list"""
@@ -783,6 +987,80 @@ class LMStudioApp:
         try:
             # Get all chat files
             chat_files = glob.glob(os.path.join(CHAT_DIR, "*.json"))
+            self.chats = []  # Store chats as a class variable
+            
+            for file in chat_files:
+                with open(file, 'r') as f:
+                    chat_data = json.load(f)
+                    self.chats.append((chat_data['timestamp'], chat_data['title'], chat_data['id']))
+            
+            # Sort by timestamp (newest first)
+            self.chats.sort(reverse=True)
+            
+            # Update listbox
+            for _, title, chat_id in self.chats:
+                self.history_list.insert(tk.END, title)
+                
+            # Select current chat if it exists
+            if hasattr(self, 'current_chat_id'):
+                for i, (_, _, chat_id) in enumerate(self.chats):
+                    if chat_id == self.current_chat_id:
+                        self.history_list.selection_clear(0, tk.END)
+                        self.history_list.selection_set(i)
+                        break
+            
+        except Exception as e:
+            print(f"Error updating chat list: {e}")
+            logging.error(f"Error updating chat list: {e}")
+
+    def on_history_click(self, event):
+        """Handle mouse clicks on history list to prevent accidental multi-select"""
+        # Get the clicked item index
+        clicked_index = self.history_list.nearest(event.y)
+        
+        # If not holding Ctrl/Command, clear other selections
+        if not (event.state & 0x0004):  # Check for Control/Command key
+            self.history_list.selection_clear(0, tk.END)
+            self.history_list.selection_set(clicked_index)
+            
+            # Load the clicked chat
+            if hasattr(self, 'chats') and clicked_index < len(self.chats):
+                _, _, chat_id = self.chats[clicked_index]
+                if chat_id != self.current_chat_id:  # Only load if different chat selected
+                    self.save_current_chat()  # Save current chat before loading new one
+                    self.load_chat(chat_id)
+        
+        return 'break'  # Prevent default handling
+
+    def on_history_select(self, event):
+        """Handle chat history selection"""
+        selection = self.history_list.curselection()
+        if selection and hasattr(self, 'chats'):
+            try:
+                index = selection[0]
+                if index < len(self.chats):
+                    _, _, chat_id = self.chats[index]
+                    if chat_id != self.current_chat_id:  # Only load if different chat selected
+                        self.save_current_chat()  # Save current chat before loading new one
+                        self.load_chat(chat_id)
+                
+            except Exception as e:
+                print(f"Error loading selected chat: {e}")
+                logging.error(f"Error loading selected chat: {e}")
+
+    def delete_selected_chats(self):
+        """Delete the selected chats"""
+        selections = self.history_list.curselection()
+        if not selections:
+            messagebox.showwarning("Warning", "Please select chats to delete")
+            return
+            
+        if not messagebox.askyesno("Confirm Delete", "Are you sure you want to delete the selected chats?"):
+            return
+            
+        try:
+            # Get all chat files and sort by timestamp
+            chat_files = glob.glob(os.path.join(CHAT_DIR, "*.json"))
             chats = []
             
             for file in chat_files:
@@ -790,49 +1068,69 @@ class LMStudioApp:
                     chat_data = json.load(f)
                     chats.append((chat_data['timestamp'], chat_data['title'], chat_data['id']))
             
-            # Sort by timestamp (newest first)
             chats.sort(reverse=True)
             
-            # Update listbox
-            for _, title, _ in chats:
-                self.history_list.insert(tk.END, title)
+            # Delete selected chats
+            for index in selections:
+                _, _, chat_id = chats[index]
+                chat_file = os.path.join(CHAT_DIR, f"{chat_id}.json")
+                if os.path.exists(chat_file):
+                    os.remove(chat_file)
+                    
+            # Update the list
+            self.update_chat_list()
+            
+            # If we deleted the current chat, start a new one
+            if self.current_chat_id in [chats[i][2] for i in selections]:
+                self.start_new_chat()
                 
         except Exception as e:
-            print(f"Error updating chat list: {e}")
-
-    def on_history_select(self, event):
-        """Handle chat history selection"""
-        selection = self.history_list.curselection()
-        if selection:
-            try:
-                # Get all chat files and sort by timestamp
-                chat_files = glob.glob('chats/*.json')
-                chats = []
+            messagebox.showerror("Error", f"Failed to delete chats: {str(e)}")
+            
+    def clear_all_chats(self):
+        """Clear all chat history"""
+        if not messagebox.askyesno("Confirm Clear", "Are you sure you want to delete all chats? This cannot be undone."):
+            return
+            
+        try:
+            # Delete all chat files
+            chat_files = glob.glob(os.path.join(CHAT_DIR, "*.json"))
+            for file in chat_files:
+                os.remove(file)
                 
-                for file in chat_files:
-                    with open(file, 'r') as f:
-                        chat_data = json.load(f)
-                        chats.append((chat_data['timestamp'], chat_data['title'], chat_data['id']))
-                
-                chats.sort(reverse=True)
-                
-                # Load the selected chat
-                _, _, chat_id = chats[selection[0]]
-                self.save_current_chat()  # Save current chat before loading new one
-                self.load_chat(chat_id)
-                
-            except Exception as e:
-                print(f"Error loading selected chat: {e}")
+            # Update the list
+            self.update_chat_list()
+            
+            # Start a new chat
+            self.start_new_chat()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to clear chats: {str(e)}")
 
 
 if __name__ == "__main__":
     try:
-        with open("/tmp/aiprompt_reached.txt", "w") as f:
+        setup_logging()
+        logging.info("Initializing main window")
+        
+        # Create a test file to verify we can write to the filesystem
+        test_file = os.path.expanduser("~/Library/Logs/AIPrompt/test.txt")
+        with open(test_file, "w") as f:
             f.write("Main launched successfully!\n")
+        
         root = tk.Tk()
         app = LMStudioApp(root)
+        logging.info("Starting mainloop")
         root.mainloop()
     except Exception as e:
-        with open("/tmp/aiprompt_error.log", "w") as f:
-            f.write(str(e))
+        logging.error(f"Critical error: {str(e)}")
+        logging.error(traceback.format_exc())
+        
+        # Try to show error in a message box
+        try:
+            root = tk.Tk()
+            root.withdraw()  # Hide the main window
+            messagebox.showerror("Error", f"Failed to start AIPrompt: {str(e)}\n\nCheck ~/Library/Logs/AIPrompt/aiprompt.log for details.")
+        except:
+            print(f"Failed to show error dialog: {e}")
         raise

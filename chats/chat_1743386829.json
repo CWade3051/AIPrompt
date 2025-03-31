@@ -1,7 +1,7 @@
 {
   "id": "chat_1743386829",
   "title": "Curl GitHub Gists Query",
-  "timestamp": 1743386871.954083,
+  "timestamp": 1743463491.308144,
   "history": [
     {
       "prompt": "do a curl to get all of user CWade3051 github gists",
@@ -12,5 +12,6 @@
         "title": "Curl GitHub Gists Query"
       }
     }
-  ]
+  ],
+  "terminal_output": []
 }

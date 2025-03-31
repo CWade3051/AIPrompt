@@ -9,7 +9,7 @@
 	<key>CFBundleIconFile</key>
 	<string>generated-b71c6cde87325f034f1fe87e20293061edba94aa828b10fc50e20431bfcbc52e.icns</string>
 	<key>CFBundleIdentifier</key>
-	<string>AIPrompt</string>
+	<string>com.aiprompt.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -17,8 +17,16 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.0.0</string>
-	<key>NSHighResolutionCapable</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1.0.0</string>
+	<key>LSBackgroundOnly</key>
 	<true/>
+	<key>LSMinimumSystemVersion</key>
+	<string>10.13.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>AIPrompt needs to access Apple Events to function properly.</string>
+	<key>NSHighResolutionCapable</key>
+	<string>True</string>
 </dict>
 </plist>
