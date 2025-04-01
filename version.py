@@ -3,12 +3,17 @@ import sys
 import json
 import shutil
 import subprocess
+import requests
 from datetime import datetime
+from urllib.parse import urljoin
 
 VERSION_FILE = "version.json"
 CHANGELOG_FILE = "CHANGELOG.md"
 ARCHIVE_DIR = "archive"
 RELEASE_DIR = "release"
+GITHUB_API_BASE = "https://api.github.com"
+GITHUB_USERNAME = "CWade3051"
+GITHUB_REPO = "AIPrompt"
 
 def load_version():
     """Load current version info"""
@@ -59,7 +64,7 @@ def update_changelog(version, changes):
         f.write(content)
 
 def archive_current_version():
-    """Archive current version of code"""
+    """Archive current version of code and release files"""
     version_info = load_version()
     current_version = version_info['version']
     
@@ -70,7 +75,7 @@ def archive_current_version():
     archive_dir = os.path.join(ARCHIVE_DIR, f"v{current_version}")
     os.makedirs(archive_dir, exist_ok=True)
     
-    # Copy relevant files
+    # Copy source files
     files_to_archive = [
         'AIPrompt.py',
         'AIPrompt.spec',
@@ -85,6 +90,18 @@ def archive_current_version():
     for file in files_to_archive:
         if os.path.exists(file):
             shutil.copy2(file, archive_dir)
+    
+    # Archive release files if they exist
+    release_files = {
+        'win': 'AIPrompt-win.exe',
+        'mac': 'AIPrompt-mac.zip'
+    }
+    
+    for platform, file in release_files.items():
+        src = os.path.join(RELEASE_DIR, file)
+        if os.path.exists(src):
+            shutil.copy2(src, archive_dir)
+            print(f"Archived {file}")
 
 def build_new_version():
     """Build new version for the current platform"""
@@ -102,6 +119,144 @@ def build_new_version():
         subprocess.run(['./build-mac.sh'], check=True)
         print("\nmacOS build complete! The zipped app can be found in the release directory.")
         print("NOTE: To build for Windows, run the build-win.ps1 script on a Windows system.")
+
+def update_readme(version):
+    """Update README.md with release information"""
+    if not os.path.exists('README.md'):
+        return
+    
+    with open('README.md', 'r') as f:
+        content = f.read()
+    
+    # Check if release section exists
+    release_section = "\n## Releases\n\n"
+    if release_section not in content:
+        content += release_section
+    
+    # Update release information
+    release_info = f"""Latest release: v{version}
+
+### Download Latest Release
+- [Windows (AIPrompt-win.exe)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-win.exe)
+- [macOS (AIPrompt-mac.zip)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-mac.zip)
+
+For older releases, visit the [GitHub releases page](https://github.com/CWade3051/AIPrompt/releases).
+"""
+    
+    # Replace or add release information
+    if "Latest release:" in content:
+        # Replace existing release info
+        start = content.find("Latest release:")
+        end = content.find("\n\n", start)
+        if end == -1:
+            end = len(content)
+        content = content[:start] + release_info + content[end:]
+    else:
+        # Add release info after the release section
+        content = content.replace(release_section, release_section + release_info)
+    
+    with open('README.md', 'w') as f:
+        f.write(content)
+
+def get_github_token():
+    """Get GitHub token from environment variable"""
+    token = os.environ.get('GITHUB_TOKEN')
+    if not token:
+        print("Error: GITHUB_TOKEN environment variable not set")
+        print("Please set it with: export GITHUB_TOKEN=your_github_token")
+        sys.exit(1)
+    return token
+
+def create_github_release(version, changes, token):
+    """Create a new GitHub release"""
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    # Get the latest changes from changelog
+    with open(CHANGELOG_FILE, 'r') as f:
+        content = f.read()
+        # Find the section for this version
+        version_section = f"## [{version}]"
+        start = content.find(version_section)
+        if start != -1:
+            end = content.find("##", start + len(version_section))
+            if end == -1:
+                end = len(content)
+            release_notes = content[start:end].strip()
+        else:
+            release_notes = f"Release v{version}\n\n{changes}"
+    
+    # Create release
+    release_data = {
+        "tag_name": f"v{version}",
+        "name": f"Release v{version}",
+        "body": release_notes,
+        "draft": False,
+        "prerelease": False
+    }
+    
+    url = urljoin(GITHUB_API_BASE, f"/repos/{GITHUB_USERNAME}/{GITHUB_REPO}/releases")
+    response = requests.post(url, headers=headers, json=release_data)
+    
+    if response.status_code != 201:
+        print(f"Error creating GitHub release: {response.text}")
+        return None
+    
+    release_info = response.json()
+    return release_info
+
+def upload_release_assets(release_info, token):
+    """Upload release assets to GitHub"""
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    upload_url = release_info['upload_url'].replace("{?name,label}", "")
+    
+    # Upload Windows executable
+    win_exe = os.path.join(RELEASE_DIR, "AIPrompt-win.exe")
+    if os.path.exists(win_exe):
+        with open(win_exe, 'rb') as f:
+            response = requests.post(
+                f"{upload_url}?name=AIPrompt-win.exe",
+                headers=headers,
+                data=f
+            )
+            if response.status_code != 201:
+                print(f"Error uploading Windows executable: {response.text}")
+    
+    # Upload macOS zip
+    mac_zip = os.path.join(RELEASE_DIR, "AIPrompt-mac.zip")
+    if os.path.exists(mac_zip):
+        with open(mac_zip, 'rb') as f:
+            response = requests.post(
+                f"{upload_url}?name=AIPrompt-mac.zip",
+                headers=headers,
+                data=f
+            )
+            if response.status_code != 201:
+                print(f"Error uploading macOS zip: {response.text}")
+
+def push_to_github():
+    """Push changes to GitHub"""
+    try:
+        # Add all changes
+        subprocess.run(['git', 'add', '.'], check=True)
+        
+        # Commit changes
+        version_info = load_version()
+        commit_message = f"Release v{version_info['version']}"
+        subprocess.run(['git', 'commit', '-m', commit_message], check=True)
+        
+        # Push to GitHub
+        subprocess.run(['git', 'push', 'origin', 'main'], check=True)
+        print("Successfully pushed changes to GitHub")
+    except subprocess.CalledProcessError as e:
+        print(f"Error pushing to GitHub: {e}")
+        sys.exit(1)
 
 def main():
     if len(sys.argv) < 3:
@@ -139,15 +294,47 @@ def main():
     # Update changelog
     update_changelog(new_version, changes)
     
+    # Update README with release information
+    print("\nUpdating README with release information...")
+    update_readme(new_version)
+    
     # Build new version
     build_new_version()
     
     print(f"\nVersion {new_version} update complete!")
-    print("\nNext steps:")
-    print("1. Review the changes in CHANGELOG.md")
-    print("2. Build for the other platform if needed (run build script directly)")
-    print("3. Commit and push all changes to the repository")
-    print("4. Create a new release on GitHub with the built executables")
+    
+    # Get GitHub token
+    token = get_github_token()
+    
+    # Create GitHub release
+    print("\nCreating GitHub release...")
+    release_info = create_github_release(new_version, changes, token)
+    if release_info:
+        print("Successfully created GitHub release")
+        
+        # Upload release assets
+        print("\nUploading release assets...")
+        upload_release_assets(release_info, token)
+        print("Successfully uploaded release assets")
+        
+        # Push changes to GitHub
+        print("\nPushing changes to GitHub...")
+        push_to_github()
+        
+        print(f"\nRelease v{new_version} is now complete!")
+        print("\nNext steps:")
+        print("1. Build for the other platform if needed (run build script directly)")
+        print("2. The release will be automatically updated with the new build")
+    else:
+        print("\nFailed to create GitHub release. Please create it manually:")
+        print("1. Go to https://github.com/CWade3051/AIPrompt/releases/new")
+        print("2. Tag version: v" + new_version)
+        print("3. Title: Release v" + new_version)
+        print("4. Description: Copy the latest changes from CHANGELOG.md")
+        print("5. Upload the following files from the release directory:")
+        print("   - AIPrompt-win.exe (Windows)")
+        print("   - AIPrompt-mac.zip (macOS)")
+        print("6. Publish the release")
 
 if __name__ == "__main__":
     main() 
