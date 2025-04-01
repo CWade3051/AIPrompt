@@ -7,39 +7,83 @@ function Update-LatestRelease {
         exit 1
     }
 
-    # Get the latest release information
-    Write-Host "Fetching latest release information..."
+    # API Headers
     $headers = @{
-        "Authorization" = "Bearer $env:GITHUB_TOKEN"
+        "Authorization" = "token $env:GITHUB_TOKEN"
         "Accept" = "application/vnd.github.v3+json"
     }
 
-    $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/CWade3051/AIPrompt/releases/latest" -Headers $headers
-    $releaseId = $releaseInfo.id
-    $uploadUrl = $releaseInfo.upload_url -replace '{?name,label}', ''
+    try {
+        # Get the latest release
+        Write-Host "Fetching latest release information..."
+        $releaseUrl = "https://api.github.com/repos/CWade3051/AIPrompt/releases/latest"
+        $releaseInfo = Invoke-RestMethod -Uri $releaseUrl -Headers $headers -Method Get
+        
+        if (-not $releaseInfo.id) {
+            Write-Host "Error: Could not find latest release ID"
+            exit 1
+        }
+        
+        Write-Host "Found release: $($releaseInfo.name) (ID: $($releaseInfo.id))"
 
-    if (-not $releaseId) {
-        Write-Host "Error: Could not find latest release ID"
+        # Delete existing Windows asset if it exists
+        foreach ($asset in $releaseInfo.assets) {
+            if ($asset.name -eq "AIPrompt-win.exe") {
+                Write-Host "Found existing Windows asset (ID: $($asset.id)). Deleting..."
+                try {
+                    $deleteUrl = "https://api.github.com/repos/CWade3051/AIPrompt/releases/assets/$($asset.id)"
+                    Invoke-RestMethod -Uri $deleteUrl -Method Delete -Headers $headers
+                    Write-Host "Successfully deleted existing asset"
+                } catch {
+                    Write-Host "Warning: Failed to delete existing asset: $($_.Exception.Message)"
+                }
+                break
+            }
+        }
+
+        # Upload new build
+        $filePath = ".\release\AIPrompt-win.exe"
+        if (-not (Test-Path $filePath)) {
+            Write-Host "Error: Build file not found at $filePath"
+            exit 1
+        }
+
+        Write-Host "Uploading new build to release..."
+        
+        # Construct upload URL
+        $uploadUrl = "https://uploads.github.com/repos/CWade3051/AIPrompt/releases/$($releaseInfo.id)/assets?name=AIPrompt-win.exe"
+        
+        # Upload the file
+        $uploadHeaders = $headers.Clone()
+        $uploadHeaders["Content-Type"] = "application/octet-stream"
+        
+        try {
+            $response = Invoke-RestMethod -Uri $uploadUrl -Method Post -Headers $uploadHeaders -InFile $filePath
+            Write-Host "Successfully uploaded new Windows build!"
+            Write-Host "Download URL: $($response.browser_download_url)"
+        } catch {
+            Write-Host "Error uploading asset:"
+            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
+            
+            # Try to get response body for more details
+            try {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $reader.BaseStream.Position = 0
+                $reader.DiscardBufferedData()
+                $responseBody = $reader.ReadToEnd()
+                Write-Host "Response Body: $responseBody"
+            } catch {
+                Write-Host "Could not read response body: $($_.Exception.Message)"
+            }
+            exit 1
+        }
+
+    } catch {
+        Write-Host "Error updating release: $($_.Exception.Message)"
+        Write-Host "Full Error: $_"
         exit 1
     }
-
-    # Delete existing Windows asset if it exists
-    foreach ($asset in $releaseInfo.assets) {
-        if ($asset.name -eq "AIPrompt-win.exe") {
-            Write-Host "Deleting existing Windows asset..."
-            Invoke-RestMethod -Uri "https://api.github.com/repos/CWade3051/AIPrompt/releases/assets/$($asset.id)" -Method Delete -Headers $headers
-        }
-    }
-
-    # Upload new build
-    Write-Host "Uploading new build to release..."
-    $filePath = ".\release\AIPrompt-win.exe"
-    $fileBytes = [System.IO.File]::ReadAllBytes($filePath)
-    
-    $headers["Content-Type"] = "application/octet-stream"
-    Invoke-RestMethod -Uri "$uploadUrl?name=AIPrompt-win.exe" -Method Post -Headers $headers -Body $fileBytes
-
-    Write-Host "Successfully updated latest release with new Windows build!"
 }
 
 # Kill any running instances of AIPrompt
@@ -50,6 +94,7 @@ if ($processes) {
     Start-Sleep -Seconds 1  # Give it a moment to fully close
 }
 
+# Clean and rebuild
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force ".\release\AIPrompt-win.exe" -ErrorAction SilentlyContinue
 pyinstaller AIPrompt.spec
