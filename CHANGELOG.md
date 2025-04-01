@@ -1,6 +1,10 @@
 # Changelog
 
 
+## [1.0.3] - 2025-04-01
+
+- Test release with automated GitHub integration
+
 ## [1.0.2] - 2025-04-01
 
 - Updated OpenAI integration to use new client-based API format
