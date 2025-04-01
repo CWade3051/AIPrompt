@@ -1,6 +1,5 @@
-/.DS_Store
+.DS_Store
 /.venv
 /chats
 /build
 /dist
-/build
