@@ -1,5 +1,9 @@
 # Changelog
 
+
+## [1.0.1] - 2025-04-01
+
+- Fixed OpenAI integration to use correct JSON response format
 All notable changes to this project will be documented in this file.
 
 ## [1.0.0] - 2024-03-25

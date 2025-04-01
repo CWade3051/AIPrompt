@@ -13,6 +13,7 @@ import traceback
 import logging
 import signal
 import psutil
+import openai
 
 # Set up logging and chat directories based on platform
 def setup_app_directories():
@@ -604,142 +605,74 @@ class LMStudioApp:
 
     def send_openai_prompt(self, model, user_prompt, api_key):
         """
-        Sends a chat-style request to OpenAI's /v1/chat/completions.
-        Includes structured output format and OS-specific system prompts.
+        Send a chat-style request to OpenAI's /v1/chat/completions endpoint.
+        Uses OpenAI's structured output format for GPT-4 and newer models.
         """
-        # Define the JSON schema for structured output
-        json_schema = {
-            "name": "shell_response",
-            "strict": "true",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "powershell": {
-                        "type": "string",
-                        "description": "ONLY the exact PowerShell commands to execute. No comments, no explanations, no backticks. If no command is needed, use empty string."
-                    },
-                    "zsh": {
-                        "type": "string",
-                        "description": "ONLY the exact ZSH commands to execute. No comments, no explanations, no backticks. If no command is needed, use empty string."
-                    },
-                    "instructions": {
-                        "type": "string",
-                        "description": "All explanations, context, examples, and command descriptions go here. Use Markdown formatting."
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "A short, descriptive title for this chat exchange (max 50 characters)"
-                    }
-                },
-                "required": ["powershell", "zsh", "instructions", "title"]
-            }
-        }
-
-        # Include conversation history in the messages
-        messages = []
-        for exchange in self.conversation_history:
-            messages.append({"role": "user", "content": exchange["prompt"]})
-            if "response" in exchange:
-                messages.append({"role": "assistant", "content": json.dumps(exchange["response"])})
-
-        if self.is_windows:
-            system_prompt = (
-                "You are a highly skilled Windows PowerShell expert specializing in system administration, "
-                "automation, and development tasks. Your responses should be tailored for Windows environments "
-                "and utilize PowerShell's advanced features effectively.\n\n"
-                "For every response, output a JSON object with these keys:\n\n"
-                "• \"powershell\": ONLY include the exact PowerShell commands to execute. No comments, no explanations, "
-                "no backticks, no markdown formatting. Multiple commands should be separated by semicolons or newlines. "
-                "If no command is needed, output an empty string (\"\").\n\n"
-                "• \"zsh\": Always output an empty string (\"\") since we're on Windows.\n\n"
-                "• \"instructions\": All other information goes here, including:\n"
-                "  - Command explanations and descriptions\n"
-                "  - Prerequisites or dependencies\n"
-                "  - Expected output or behavior\n"
-                "  - Error handling and troubleshooting\n"
-                "  - Alternative approaches\n"
-                "  - Code examples and documentation\n"
-                "You may use Markdown formatting in this field only.\n\n"
-                "• \"title\": A concise, descriptive title for this chat exchange (max 50 characters).\n\n"
-                "Ensure all PowerShell commands follow security best practices and are safe to execute.\n\n"
-                "IMPORTANT: Never include command explanations or markdown formatting in the powershell field - "
-                "all explanatory text must go in the instructions field."
-            )
+        openai.api_key = api_key
+        
+        # System prompt based on OS
+        if platform.system() == "Windows":
+            system_prompt = """You are a Windows PowerShell automation expert. Follow these rules:
+1. Provide PowerShell commands that are safe and effective
+2. Include detailed explanations of what each command does
+3. Format response as a JSON object with these fields:
+   - powershell: ONLY the exact PowerShell commands (no backticks/comments)
+   - zsh: Empty string for Windows
+   - instructions: Markdown-formatted explanations
+   - title: Short descriptive title (max 50 chars)
+4. Ensure all commands are properly escaped and quoted
+5. Use absolute paths when necessary"""
         else:
-            system_prompt = (
-                "You are a highly skilled Unix/macOS shell expert specializing in ZSH, system administration, "
-                "and development tasks. Your responses should be tailored for Unix/macOS environments "
-                "and leverage ZSH's advanced features effectively.\n\n"
-                "For every response, output a JSON object with these keys:\n\n"
-                "• \"zsh\": ONLY include the exact ZSH commands to execute. No comments, no explanations, "
-                "no backticks, no markdown formatting. Multiple commands should be separated by semicolons or newlines. "
-                "If no command is needed, output an empty string (\"\").\n\n"
-                "• \"powershell\": Always output an empty string (\"\") since we're on Unix/macOS.\n\n"
-                "• \"instructions\": All other information goes here, including:\n"
-                "  - Command explanations and descriptions\n"
-                "  - Prerequisites or dependencies\n"
-                "  - Expected output or behavior\n"
-                "  - Error handling and troubleshooting\n"
-                "  - Alternative approaches\n"
-                "  - Code examples and documentation\n"
-                "You may use Markdown formatting in this field only.\n\n"
-                "• \"title\": A concise, descriptive title for this chat exchange (max 50 characters).\n\n"
-                "Ensure all commands follow security best practices and are safe to execute.\n\n"
-                "IMPORTANT: Never include command explanations or markdown formatting in the zsh field - "
-                "all explanatory text must go in the instructions field."
-            )
-
-        # Add system prompt and current user prompt
-        messages = [{"role": "system", "content": system_prompt}] + messages
-        messages.append({"role": "user", "content": user_prompt})
-
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-
-        # Base payload that works for all models
-        payload = {
-            "model": model,
-            "messages": messages,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": json_schema
-            },
-            "max_tokens": 1000
-        }
+            system_prompt = """You are a Unix/macOS shell automation expert. Follow these rules:
+1. Provide ZSH commands that are safe and effective
+2. Include detailed explanations of what each command does
+3. Format response as a JSON object with these fields:
+   - powershell: Empty string for Unix/macOS
+   - zsh: ONLY the exact ZSH commands (no backticks/comments)
+   - instructions: Markdown-formatted explanations
+   - title: Short descriptive title (max 50 chars)
+4. Ensure all commands are properly escaped and quoted
+5. Use absolute paths when necessary"""
 
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            if "choices" not in data or len(data["choices"]) == 0:
-                return None
-            assistant_message = data["choices"][0]["message"]["content"]
-            # Strip markdown markers if present
-            if assistant_message.startswith("```json"):
-                assistant_message = assistant_message.replace("```json", "").rstrip("```").strip()
-            try:
-                parsed = json.loads(assistant_message)
-                # Update chat title if this is the first message
-                if not self.conversation_history:
-                    self.current_chat_title = parsed.get('title', 'New Chat')
-                # Add to conversation history
-                self.conversation_history.append({
-                    "prompt": user_prompt,
-                    "response": parsed
-                })
-                # Save chat
-                self.save_current_chat()
-                # Update chat list
-                self.update_chat_list()
-                return parsed
-            except json.JSONDecodeError:
-                return { self.shell_key: "", "instructions": assistant_message }
+            response = openai.ChatCompletion.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                response_format={"type": "json_object"}
+            )
+            
+            # Extract and validate the response
+            response_text = response.choices[0].message.content
+            response_data = json.loads(response_text)
+            
+            # Validate required fields
+            required_fields = ["powershell", "zsh", "instructions", "title"]
+            for field in required_fields:
+                if field not in response_data:
+                    raise ValueError(f"Missing required field: {field}")
+            
+            return response_data
+            
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse OpenAI response: {e}")
+            return {
+                "powershell": "",
+                "zsh": "",
+                "instructions": "Error: Invalid response format from OpenAI",
+                "title": "Error Processing Response"
+            }
         except Exception as e:
-            print("Error sending OpenAI prompt:", e)
-            return None
+            logging.error(f"OpenAI API error: {e}")
+            return {
+                "powershell": "",
+                "zsh": "",
+                "instructions": f"Error: {str(e)}",
+                "title": "API Error"
+            }
 
     # ---------------------- Command Execution ----------------------
     def on_run_command(self):
