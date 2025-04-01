@@ -96,8 +96,8 @@ class LMStudioApp:
         else:
             self.shell_label = "ZSH"
             self.shell_key = "zsh"
-            # Set up log directory for Unix/Mac
-            self.log_dir = os.path.expanduser("~/Library/Logs/AIPrompt")
+            # Use the same log directory as the rest of the app
+            self.log_dir = LOG_DIR
 
         # Create log directory
         os.makedirs(self.log_dir, exist_ok=True)
@@ -1182,11 +1182,6 @@ if __name__ == "__main__":
         setup_logging(LOG_DIR)
         logging.info("Initializing main window")
         
-        # Create a test file to verify we can write to the filesystem
-        test_file = os.path.expanduser("~/Library/Logs/AIPrompt/test.txt")
-        with open(test_file, "w") as f:
-            f.write("Main launched successfully!\n")
-        
         root = tk.Tk()
         app = LMStudioApp(root)
         logging.info("Starting mainloop")
@@ -1199,7 +1194,7 @@ if __name__ == "__main__":
         try:
             root = tk.Tk()
             root.withdraw()  # Hide the main window
-            messagebox.showerror("Error", f"Failed to start AIPrompt: {str(e)}\n\nCheck ~/Library/Logs/AIPrompt/aiprompt.log for details.")
+            messagebox.showerror("Error", f"Failed to start AIPrompt: {str(e)}\n\nCheck Application Support/AIPrompt/Logs/aiprompt.log for details.")
         except:
             print(f"Failed to show error dialog: {e}")
         raise
