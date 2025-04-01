@@ -134,17 +134,3 @@ Latest release: v1.1.0
 - [macOS (AIPrompt-mac.zip)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-mac.zip)
 
 For older releases, visit the [GitHub releases page](https://github.com/CWade3051/AIPrompt/releases).
-
-
-### Download Latest Release
-- [Windows (AIPrompt-win.exe)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-win.exe)
-- [macOS (AIPrompt-mac.zip)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-mac.zip)
-
-For older releases, visit the [GitHub releases page](https://github.com/CWade3051/AIPrompt/releases).
-
-
-### Download Latest Release
-- [Windows (AIPrompt-win.exe)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-win.exe)
-- [macOS (AIPrompt-mac.zip)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-mac.zip)
-
-For older releases, visit the [GitHub releases page](https://github.com/CWade3051/AIPrompt/releases).

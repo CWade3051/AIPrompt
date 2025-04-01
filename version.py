@@ -135,35 +135,17 @@ def update_readme(version):
     with open('README.md', 'r') as f:
         content = f.read()
     
-    # Check if release section exists
-    release_section = "\n## Releases\n\n"
-    if release_section not in content:
-        content += release_section
-    
-    # Update release information
-    release_info = f"""Latest release: v{version}
-
-### Download Latest Release
-- [Windows (AIPrompt-win.exe)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-win.exe)
-- [macOS (AIPrompt-mac.zip)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-mac.zip)
-
-For older releases, visit the [GitHub releases page](https://github.com/CWade3051/AIPrompt/releases).
-"""
-    
-    # Replace or add release information
+    # Update only the version number in "Latest release:" line
     if "Latest release:" in content:
-        # Replace existing release info
-        start = content.find("Latest release:")
-        end = content.find("\n\n", start)
-        if end == -1:
-            end = len(content)
-        content = content[:start] + release_info + content[end:]
-    else:
-        # Add release info after the release section
-        content = content.replace(release_section, release_section + release_info)
-    
-    with open('README.md', 'w') as f:
-        f.write(content)
+        lines = content.split('\n')
+        for i, line in enumerate(lines):
+            if line.startswith("Latest release:"):
+                lines[i] = f"Latest release: v{version}"
+                break
+        content = '\n'.join(lines)
+        
+        with open('README.md', 'w') as f:
+            f.write(content)
 
 def get_github_token():
     """Get GitHub token from environment variable"""
