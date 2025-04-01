@@ -59,6 +59,15 @@ class LMStudioApp:
 
         # Detect if we're on Windows or not
         self.is_windows = platform.system().lower().startswith('win')
+
+        # Set icon for Windows
+        if self.is_windows:
+            try:
+                icon_path = os.path.join(APP_ROOT, "assets", "icons", "icon.ico")
+                self.root.iconbitmap(icon_path)
+            except Exception as e:
+                print(f"Failed to set window icon: {e}")
+
         if self.is_windows:
             self.shell_label = "PowerShell"
             self.shell_key = "powershell"
