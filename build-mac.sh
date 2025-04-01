@@ -35,7 +35,7 @@ pyinstaller AIPrompt.spec
 if [ $? -eq 0 ]; then
     echo "Build successful. Creating zip archive..."
     # Create zip archive
-    zip -r AIPrompt-mac.zip ./dist/AIPrompt.app
+    zip -r ./release/AIPrompt-mac.zip ./dist/AIPrompt.app
     echo "Build and packaging complete!"
 else
     echo "Build failed!"
