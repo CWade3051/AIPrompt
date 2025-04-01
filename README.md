@@ -57,6 +57,7 @@ Prerequisites:
 - Python 3.8 or higher
 - pip (Python package installer)
 - Git
+- GitHub Personal Access Token (for release management)
 
 ```bash
 # Clone the repository
@@ -72,13 +73,53 @@ source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Build the application
-# On Windows:
-.\build-win.ps1
-# On macOS:
-./build-mac.sh
 ```
+
+#### Build and Release Process
+
+The project uses a cross-platform build pipeline that handles version management and releases:
+
+1. **Creating a New Release**
+   ```bash
+   # Set your GitHub token
+   export GITHUB_TOKEN=your_github_token  # On macOS/Linux
+   $env:GITHUB_TOKEN = "your_github_token"  # On Windows
+
+   # Create a new release (increment version and build)
+   python version.py [major|minor|patch] "Your release description"
+   ```
+   This will:
+   - Increment the version number
+   - Update the changelog
+   - Build for the current platform
+   - Create a GitHub release
+   - Upload the current platform's build
+
+2. **Building for Other Platforms**
+   After creating a release on one platform, build for the other platform:
+   ```bash
+   # On Windows:
+   .\build-win.ps1
+   # On macOS:
+   ./build-mac.sh
+   ```
+   The build script will:
+   - Build the application
+   - Automatically update the latest GitHub release with the new platform build
+
+3. **Manual Building (without release)**
+   To build without creating a release:
+   ```bash
+   # On Windows:
+   .\build-win.ps1
+   # On macOS:
+   ./build-mac.sh
+   ```
+   Builds will be available in the `release` directory.
+
+#### Build Output Locations
+- Windows: `release/AIPrompt-win.exe`
+- macOS: `release/AIPrompt-mac.zip`
 
 ## Usage
 
