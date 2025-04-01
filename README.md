@@ -127,7 +127,14 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
 ## Releases
 
-Latest release: v1.0.4
+Latest release: v1.1.0
+
+### Download Latest Release
+- [Windows (AIPrompt-win.exe)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-win.exe)
+- [macOS (AIPrompt-mac.zip)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-mac.zip)
+
+For older releases, visit the [GitHub releases page](https://github.com/CWade3051/AIPrompt/releases).
+
 
 ### Download Latest Release
 - [Windows (AIPrompt-win.exe)](https://github.com/CWade3051/AIPrompt/releases/latest/download/AIPrompt-win.exe)

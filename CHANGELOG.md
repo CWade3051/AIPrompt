@@ -1,6 +1,10 @@
 # Changelog
 
 
+## [1.1.0] - 2025-04-01
+
+- Updated OpenAI integration with strict JSON schema and improved build process to handle cross-platform releases
+
 ## [1.0.4] - 2025-04-01
 
 - Test release with improved GitHub API logging

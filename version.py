@@ -108,6 +108,9 @@ def build_new_version():
     # Create release directory
     os.makedirs(RELEASE_DIR, exist_ok=True)
     
+    # Set environment variable to indicate version.py is running
+    os.environ['VERSION_SCRIPT_RUNNING'] = '1'
+    
     # Build for current platform only
     if sys.platform.startswith('win'):
         print("\nBuilding Windows version...")
@@ -119,6 +122,10 @@ def build_new_version():
         subprocess.run(['./build-mac.sh'], check=True)
         print("\nmacOS build complete! The zipped app can be found in the release directory.")
         print("NOTE: To build for Windows, run the build-win.ps1 script on a Windows system.")
+    
+    # Clear the environment variable
+    if 'VERSION_SCRIPT_RUNNING' in os.environ:
+        del os.environ['VERSION_SCRIPT_RUNNING']
 
 def update_readme(version):
     """Update README.md with release information"""

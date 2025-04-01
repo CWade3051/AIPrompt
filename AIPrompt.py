@@ -612,6 +612,30 @@ class LMStudioApp:
             # Create OpenAI client
             client = openai.OpenAI(api_key=api_key)
             
+            # Define the JSON schema for structured output
+            json_schema = {
+                "type": "object",
+                "properties": {
+                    "powershell": {
+                        "type": "string",
+                        "description": "ONLY the exact PowerShell commands to execute. No comments, no explanations, no backticks. If no command is needed, use empty string."
+                    },
+                    "zsh": {
+                        "type": "string",
+                        "description": "ONLY the exact ZSH commands to execute. No comments, no explanations, no backticks. If no command is needed, use empty string."
+                    },
+                    "instructions": {
+                        "type": "string",
+                        "description": "All explanations, context, examples, and command descriptions go here. Use Markdown formatting."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "A short, descriptive title for this chat exchange (max 50 characters)"
+                    }
+                },
+                "required": ["powershell", "zsh", "instructions", "title"]
+            }
+            
             # System prompt based on OS
             if platform.system() == "Windows":
                 system_prompt = """You are a Windows PowerShell automation expert. Follow these rules:
@@ -647,12 +671,12 @@ class LMStudioApp:
             messages = [{"role": "system", "content": system_prompt}] + messages
             messages.append({"role": "user", "content": user_prompt})
 
-            # Create chat completion
+            # Create chat completion with function calling
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=0.7,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object", "schema": json_schema}
             )
             
             # Extract and validate the response
