@@ -14,12 +14,32 @@ import logging
 import signal
 import psutil
 
-# Set up logging
-def setup_logging():
-    log_dir = os.path.expanduser("~/Library/Logs/AIPrompt")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "aiprompt.log")
+# Set up logging and chat directories based on platform
+def setup_app_directories():
+    if platform.system().lower().startswith('win'):
+        # Use AppData for Windows
+        base_dir = os.path.join(os.environ.get('APPDATA', ''), 'AIPrompt')
+    else:
+        # Use Application Support for macOS (more standard than Library)
+        base_dir = os.path.expanduser("~/Library/Application Support/AIPrompt")
     
+    # Create standard subdirectories
+    log_dir = os.path.join(base_dir, 'Logs')
+    chat_dir = os.path.join(base_dir, 'Chats')
+    
+    # Create directories
+    for directory in [log_dir, chat_dir]:
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except Exception as e:
+            print(f"Error creating directory {directory}: {e}")
+            logging.error(f"Error creating directory {directory}: {e}")
+    
+    return log_dir, chat_dir
+
+# Set up logging
+def setup_logging(log_dir):
+    log_file = os.path.join(log_dir, "aiprompt.log")
     logging.basicConfig(
         filename=log_file,
         level=logging.DEBUG,
@@ -27,17 +47,17 @@ def setup_logging():
     )
     logging.info("Starting AIPrompt application")
 
+# Initialize directories
+LOG_DIR, CHAT_DIR = setup_app_directories()
+
 # Redirect stdout/stderr to a file to catch crashes in --windowed mode
 try:
-    log_dir = os.path.expanduser("~/Library/Logs/AIPrompt")
-    os.makedirs(log_dir, exist_ok=True)
-    sys.stdout = open(os.path.join(log_dir, "aiprompt_stdout.log"), "w")
-    sys.stderr = open(os.path.join(log_dir, "aiprompt_stderr.log"), "w")
+    sys.stdout = open(os.path.join(LOG_DIR, "aiprompt_stdout.log"), "w")
+    sys.stderr = open(os.path.join(LOG_DIR, "aiprompt_stderr.log"), "w")
 except Exception as e:
     print(f"Failed to redirect stdout/stderr: {e}")
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
-CHAT_DIR = os.path.join(APP_ROOT, "chats")
 
 # Try to set TCL/TK paths with error handling
 try:
@@ -747,13 +767,18 @@ class LMStudioApp:
         def run_command():
             try:
                 if self.is_windows:
-                    # For Windows, use a different creation flag to create new process group
+                    # For Windows, use hidden PowerShell window
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = subprocess.SW_HIDE
+                    
                     process = subprocess.Popen(
-                        ["powershell", "-NoProfile", "-Command", command],
+                        ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", command],
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,
-                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if self.is_windows else 0
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                        startupinfo=startupinfo
                     )
                 else:
                     # For Unix/Mac, use process group
@@ -869,15 +894,20 @@ class LMStudioApp:
             self.run_command_button.config(state=tk.NORMAL if content else tk.DISABLED)
             self.commands_text.edit_modified(False)  # Reset modified flag
 
-    def start_new_chat(self):
+    def start_new_chat(self, force_new=False):
         """Start a new chat session"""
         # Kill any running process before starting new chat
         if self.current_process:
             self.kill_current_process()
-            
-        # Save current chat if exists
-        self.save_current_chat()
         
+        # Save current chat if exists and we're not forcing a new one
+        if not force_new and hasattr(self, 'current_chat_id') and self.current_chat_id:
+            self.save_current_chat()
+        
+        self.initialize_new_chat()
+
+    def initialize_new_chat(self):
+        """Initialize a new chat without updating the chat list"""
         # Clear all input/output fields
         self.prompt_text.delete("1.0", tk.END)
         self.instructions_text.config(state=tk.NORMAL)
@@ -892,8 +922,14 @@ class LMStudioApp:
         self.terminal_output = []
         self.current_chat_title = "New Chat"
         
-        # Update UI
-        self.update_chat_list()
+        # Clear any existing selection
+        self.history_list.selection_clear(0, tk.END)
+        
+        # Save the empty new chat
+        self.save_current_chat()
+        
+        # Update the list but skip the empty check to avoid recursion
+        self.update_chat_list(skip_empty_check=True)
 
     def generate_chat_id(self):
         """Generate a unique chat ID"""
@@ -989,38 +1025,47 @@ class LMStudioApp:
             # Try to show error to user
             messagebox.showerror("Error", f"Failed to load chat content: {str(e)}")
 
-    def update_chat_list(self):
+    def update_chat_list(self, skip_empty_check=False):
         """Update the chat history list"""
-        self.history_list.delete(0, tk.END)
-        
         try:
+            self.history_list.delete(0, tk.END)
+            
             # Get all chat files
             chat_files = glob.glob(os.path.join(CHAT_DIR, "*.json"))
-            self.chats = []  # Store chats as a class variable
+            self.chats = []
             
             for file in chat_files:
-                with open(file, 'r') as f:
-                    chat_data = json.load(f)
-                    self.chats.append((chat_data['timestamp'], chat_data['title'], chat_data['id']))
+                try:
+                    with open(file, 'r') as f:
+                        chat_data = json.load(f)
+                        self.chats.append((chat_data['timestamp'], chat_data['title'], chat_data['id']))
+                except Exception as e:
+                    logging.error(f"Failed to read chat file {file}: {str(e)}")
+                    continue
             
             # Sort by timestamp (newest first)
             self.chats.sort(reverse=True)
             
             # Update listbox
-            for _, title, chat_id in self.chats:
-                self.history_list.insert(tk.END, title)
+            if self.chats:
+                for _, title, _ in self.chats:
+                    self.history_list.insert(tk.END, title)
                 
-            # Select current chat if it exists
-            if hasattr(self, 'current_chat_id'):
-                for i, (_, _, chat_id) in enumerate(self.chats):
-                    if chat_id == self.current_chat_id:
-                        self.history_list.selection_clear(0, tk.END)
-                        self.history_list.selection_set(i)
-                        break
+                # Select current chat if it exists
+                if hasattr(self, 'current_chat_id') and self.current_chat_id:
+                    for i, (_, _, chat_id) in enumerate(self.chats):
+                        if chat_id == self.current_chat_id:
+                            self.history_list.selection_clear(0, tk.END)
+                            self.history_list.selection_set(i)
+                            self.history_list.see(i)
+                            break
+            elif not skip_empty_check:
+                # No chats exist - start fresh
+                self.initialize_new_chat()
             
         except Exception as e:
-            print(f"Error updating chat list: {e}")
-            logging.error(f"Error updating chat list: {e}")
+            logging.error(f"Error updating chat list: {str(e)}")
+            messagebox.showerror("Error", f"Failed to update chat list: {str(e)}")
 
     def on_history_click(self, event):
         """Handle mouse clicks on history list to prevent accidental multi-select"""
@@ -1044,7 +1089,7 @@ class LMStudioApp:
     def on_history_select(self, event):
         """Handle chat history selection"""
         selection = self.history_list.curselection()
-        if selection and hasattr(self, 'chats'):
+        if selection and hasattr(self, 'chats') and self.chats:
             try:
                 index = selection[0]
                 if index < len(self.chats):
@@ -1052,10 +1097,9 @@ class LMStudioApp:
                     if chat_id != self.current_chat_id:  # Only load if different chat selected
                         self.save_current_chat()  # Save current chat before loading new one
                         self.load_chat(chat_id)
-                
             except Exception as e:
-                print(f"Error loading selected chat: {e}")
-                logging.error(f"Error loading selected chat: {e}")
+                logging.error(f"Error loading selected chat: {str(e)}")
+                messagebox.showerror("Error", f"Failed to load selected chat: {str(e)}")
 
     def delete_selected_chats(self):
         """Delete the selected chats"""
@@ -1068,32 +1112,45 @@ class LMStudioApp:
             return
             
         try:
-            # Get all chat files and sort by timestamp
-            chat_files = glob.glob(os.path.join(CHAT_DIR, "*.json"))
-            chats = []
-            
-            for file in chat_files:
-                with open(file, 'r') as f:
-                    chat_data = json.load(f)
-                    chats.append((chat_data['timestamp'], chat_data['title'], chat_data['id']))
-            
-            chats.sort(reverse=True)
-            
-            # Delete selected chats
+            # Get selected chat IDs before deleting
+            selected_chat_ids = []
             for index in selections:
-                _, _, chat_id = chats[index]
-                chat_file = os.path.join(CHAT_DIR, f"{chat_id}.json")
-                if os.path.exists(chat_file):
-                    os.remove(chat_file)
-                    
-            # Update the list
-            self.update_chat_list()
+                if index < len(self.chats):
+                    _, _, chat_id = self.chats[index]
+                    selected_chat_ids.append(chat_id)
             
-            # If we deleted the current chat, start a new one
-            if self.current_chat_id in [chats[i][2] for i in selections]:
-                self.start_new_chat()
+            if not selected_chat_ids:
+                return
                 
+            # Track if we're deleting the current chat
+            is_deleting_current = self.current_chat_id in selected_chat_ids
+            
+            # Delete the files
+            for chat_id in selected_chat_ids:
+                chat_file = os.path.join(CHAT_DIR, f"{chat_id}.json")
+                try:
+                    if os.path.exists(chat_file):
+                        os.remove(chat_file)
+                        logging.info(f"Deleted chat file: {chat_file}")
+                except Exception as e:
+                    logging.error(f"Failed to delete chat file {chat_file}: {str(e)}")
+                    messagebox.showerror("Error", f"Failed to delete chat: {str(e)}")
+            
+            # Update the list before potentially starting a new chat
+            remaining_files = glob.glob(os.path.join(CHAT_DIR, "*.json"))
+            
+            if not remaining_files or is_deleting_current:
+                # No chats left or current chat was deleted - start fresh
+                self.initialize_new_chat()
+            else:
+                # Load the newest remaining chat
+                self.update_chat_list(skip_empty_check=True)
+                if self.chats:
+                    _, _, newest_chat_id = self.chats[0]
+                    self.load_chat(newest_chat_id)
+            
         except Exception as e:
+            logging.error(f"Error in delete_selected_chats: {str(e)}")
             messagebox.showerror("Error", f"Failed to delete chats: {str(e)}")
             
     def clear_all_chats(self):
@@ -1103,23 +1160,26 @@ class LMStudioApp:
             
         try:
             # Delete all chat files
-            chat_files = glob.glob(os.path.join(CHAT_DIR, "*.json"))
-            for file in chat_files:
-                os.remove(file)
-                
-            # Update the list
-            self.update_chat_list()
+            deleted_files = False
+            for file in glob.glob(os.path.join(CHAT_DIR, "*.json")):
+                try:
+                    os.remove(file)
+                    deleted_files = True
+                    logging.info(f"Deleted chat file: {file}")
+                except Exception as e:
+                    logging.error(f"Failed to delete file {file}: {str(e)}")
             
-            # Start a new chat
-            self.start_new_chat()
+            # Always start fresh after clearing all chats
+            self.initialize_new_chat()
             
         except Exception as e:
+            logging.error(f"Error in clear_all_chats: {str(e)}")
             messagebox.showerror("Error", f"Failed to clear chats: {str(e)}")
 
 
 if __name__ == "__main__":
     try:
-        setup_logging()
+        setup_logging(LOG_DIR)
         logging.info("Initializing main window")
         
         # Create a test file to verify we can write to the filesystem
