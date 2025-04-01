@@ -1,6 +1,10 @@
 # Changelog
 
 
+## [1.0.2] - 2025-04-01
+
+- Updated OpenAI integration to use new client-based API format
+
 ## [1.0.1] - 2025-04-01
 
 - Fixed OpenAI integration to use correct JSON response format

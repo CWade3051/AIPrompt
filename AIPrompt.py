@@ -608,11 +608,13 @@ class LMStudioApp:
         Send a chat-style request to OpenAI's /v1/chat/completions endpoint.
         Uses OpenAI's structured output format for GPT-4 and newer models.
         """
-        openai.api_key = api_key
-        
-        # System prompt based on OS
-        if platform.system() == "Windows":
-            system_prompt = """You are a Windows PowerShell automation expert. Follow these rules:
+        try:
+            # Create OpenAI client
+            client = openai.OpenAI(api_key=api_key)
+            
+            # System prompt based on OS
+            if platform.system() == "Windows":
+                system_prompt = """You are a Windows PowerShell automation expert. Follow these rules:
 1. Provide PowerShell commands that are safe and effective
 2. Include detailed explanations of what each command does
 3. Format response as a JSON object with these fields:
@@ -622,8 +624,8 @@ class LMStudioApp:
    - title: Short descriptive title (max 50 chars)
 4. Ensure all commands are properly escaped and quoted
 5. Use absolute paths when necessary"""
-        else:
-            system_prompt = """You are a Unix/macOS shell automation expert. Follow these rules:
+            else:
+                system_prompt = """You are a Unix/macOS shell automation expert. Follow these rules:
 1. Provide ZSH commands that are safe and effective
 2. Include detailed explanations of what each command does
 3. Format response as a JSON object with these fields:
@@ -634,8 +636,8 @@ class LMStudioApp:
 4. Ensure all commands are properly escaped and quoted
 5. Use absolute paths when necessary"""
 
-        try:
-            response = openai.ChatCompletion.create(
+            # Create chat completion
+            response = client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
