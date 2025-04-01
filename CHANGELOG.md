@@ -1,6 +1,10 @@
 # Changelog
 
 
+## [1.0.4] - 2025-04-01
+
+- Test release with improved GitHub API logging
+
 ## [1.0.3] - 2025-04-01
 
 - Test release with automated GitHub integration

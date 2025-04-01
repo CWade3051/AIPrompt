@@ -170,7 +170,7 @@ def get_github_token():
 def create_github_release(version, changes, token):
     """Create a new GitHub release"""
     headers = {
-        "Authorization": f"token {token}",
+        "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github.v3+json"
     }
     
@@ -198,7 +198,12 @@ def create_github_release(version, changes, token):
     }
     
     url = urljoin(GITHUB_API_BASE, f"/repos/{GITHUB_USERNAME}/{GITHUB_REPO}/releases")
+    print(f"\nCreating release at: {url}")
+    print(f"Release data: {json.dumps(release_data, indent=2)}")
+    
     response = requests.post(url, headers=headers, json=release_data)
+    print(f"Release creation response status: {response.status_code}")
+    print(f"Response body: {response.text}")
     
     if response.status_code != 201:
         print(f"Error creating GitHub release: {response.text}")
@@ -210,35 +215,47 @@ def create_github_release(version, changes, token):
 def upload_release_assets(release_info, token):
     """Upload release assets to GitHub"""
     headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json"
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/octet-stream"
     }
     
     upload_url = release_info['upload_url'].replace("{?name,label}", "")
+    print(f"\nUpload URL: {upload_url}")
     
     # Upload Windows executable
     win_exe = os.path.join(RELEASE_DIR, "AIPrompt-win.exe")
     if os.path.exists(win_exe):
+        print(f"\nUploading Windows executable: {win_exe}")
         with open(win_exe, 'rb') as f:
             response = requests.post(
                 f"{upload_url}?name=AIPrompt-win.exe",
                 headers=headers,
                 data=f
             )
+            print(f"Windows upload status: {response.status_code}")
+            print(f"Response: {response.text}")
             if response.status_code != 201:
                 print(f"Error uploading Windows executable: {response.text}")
+    else:
+        print(f"Windows executable not found at: {win_exe}")
     
     # Upload macOS zip
     mac_zip = os.path.join(RELEASE_DIR, "AIPrompt-mac.zip")
     if os.path.exists(mac_zip):
+        print(f"\nUploading macOS zip: {mac_zip}")
         with open(mac_zip, 'rb') as f:
             response = requests.post(
                 f"{upload_url}?name=AIPrompt-mac.zip",
                 headers=headers,
                 data=f
             )
+            print(f"macOS upload status: {response.status_code}")
+            print(f"Response: {response.text}")
             if response.status_code != 201:
                 print(f"Error uploading macOS zip: {response.text}")
+    else:
+        print(f"macOS zip not found at: {mac_zip}")
 
 def push_to_github():
     """Push changes to GitHub"""
