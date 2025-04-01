@@ -636,13 +636,21 @@ class LMStudioApp:
 4. Ensure all commands are properly escaped and quoted
 5. Use absolute paths when necessary"""
 
+            # Include conversation history in the messages
+            messages = []
+            for exchange in self.conversation_history:
+                messages.append({"role": "user", "content": exchange["prompt"]})
+                if "response" in exchange:
+                    messages.append({"role": "assistant", "content": json.dumps(exchange["response"])})
+
+            # Add system prompt and current user prompt
+            messages = [{"role": "system", "content": system_prompt}] + messages
+            messages.append({"role": "user", "content": user_prompt})
+
             # Create chat completion
             response = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
+                messages=messages,
                 temperature=0.7,
                 response_format={"type": "json_object"}
             )
@@ -656,6 +664,22 @@ class LMStudioApp:
             for field in required_fields:
                 if field not in response_data:
                     raise ValueError(f"Missing required field: {field}")
+            
+            # Update chat title if this is the first message
+            if not self.conversation_history:
+                self.current_chat_title = response_data.get('title', 'New Chat')
+            
+            # Add to conversation history
+            self.conversation_history.append({
+                "prompt": user_prompt,
+                "response": response_data
+            })
+            
+            # Save chat
+            self.save_current_chat()
+            
+            # Update chat list
+            self.update_chat_list()
             
             return response_data
             
